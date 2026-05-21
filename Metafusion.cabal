@@ -1,0 +1,43 @@
+cabal-version:      3.0
+name:               Metafusion
+version:            0.1.0.0
+-- synopsis:
+-- description:
+license:            GPL-3.0-or-later
+license-file:       LICENSE
+author:             Zhangfan Li
+maintainer:         zhangfan.li@acm.org
+-- copyright:
+build-type:         Simple
+extra-doc-files:    CHANGELOG.md
+-- extra-source-files:
+
+common warnings
+    ghc-options: -Wall
+
+library
+    import:           warnings
+    exposed-modules:
+        Metafusion,
+        LazyModuloInsertion
+    other-modules:
+        PrimRoots
+    -- other-extensions:
+    build-depends:
+        base  ^>=4.17.2.1,
+        array ^>=0.5.8.0,
+        mtl   ^>=2.3.2
+    hs-source-dirs:   .
+    default-language: GHC2021
+
+test-suite Metafusion-test
+    import:           warnings
+    default-language: GHC2021
+    -- other-modules:
+    -- other-extensions:
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   test
+    main-is:          Main.hs
+    build-depends:
+        base ^>=4.17.2.1,
+        Metafusion
