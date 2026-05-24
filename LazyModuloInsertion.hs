@@ -5,11 +5,14 @@ import           Control.Monad
 import           Control.Monad.State
 import           Data.Array ((!))
 import qualified Data.Array as A
-import           Data.Bifunctor (second)
-import           Data.Bits (shiftL)
+import           Data.Bifunctor (first, second)
+import           Data.Bits (shiftL, shiftR, (.&.))
 import           Data.Function (fix, (&))
+import           Data.List.NonEmpty (NonEmpty(..))
 import           Data.Word
+import           Debug.Trace
 import           PrimRoots as Prim
+import Data.Functor
 
 data HiTerm v x
   = HiLit Int | HiRead Int | HiVar v | HiMul x x
@@ -26,10 +29,11 @@ instance Show IntType where
 data LoTerm v x
   = LoLit Int | LoRead Int | LoVar v
   | LoU16 x   | LoI16 x
-  | LoAsr x Int | LoBitAnd x Int
-  | LoAdd16 x x | LoSub16 x x
-  | LoAdd32 x x | LoMul32 x x
+  | LoAsr x Int | LoBitAnd x Int | LoMask x Int
+  | LoAddU16 x x | LoSubU16 x x | LoSubI16 x x
+  | LoAddU32 x x | LoMulU32 x x
   | LoSkip | LoLet IntType x (v -> x) | LoWrite Int x x
+  | LoExact x (v -> x)
   deriving Functor
 
 --
@@ -50,9 +54,6 @@ newHopeQ = 12289
 newHopeQinv :: Int
 newHopeQinv = 12287
 
-maxU18 :: Int
-maxU18 = fromIntegral (1 `shiftL` 18 - 1 :: Word32)
-
 τInsert :: forall v. Eq v => Threshold ->
   forall x. (LoTerm v x -> x)
   -> HiTerm v (Counter v x)
@@ -65,17 +66,8 @@ maxU18 = fromIntegral (1 `shiftL` 18 - 1 :: Word32)
     let (lo₁, _) = evalCounter hi₁ σ ρ
         (lo₂, _) = evalCounter hi₂ σ ρ
     in (,undefined) $
-       φ (LoLet U32 (φ (LoMul32 lo₁ lo₂))
-          (\x ->
-             φ (LoLet I16
-                 (φ (LoSub16
-                      (φ (LoI16 (mred (φ (LoVar x)))))
-                      (φ (LoLit newHopeQ))))
-                 (\v ->
-                    φ (LoAdd16
-                        (φ (LoVar v))
-                        (φ (LoBitAnd (φ (LoAsr (φ (LoVar v)) 15))
-                             newHopeQ)))))))
+       φ (LoLet U32 (φ (LoMulU32 lo₁ lo₂))
+          (\x -> exact csub (mred (φ (LoVar x)))))
   HiSkip -> (φ LoSkip, undefined)
   HiLet hi h ->
     let (lo, c) = evalCounter hi σ ρ
@@ -88,12 +80,12 @@ maxU18 = fromIntegral (1 `shiftL` 18 - 1 :: Word32)
       if θ i >= c₁ + 1 then
         let σ' j | j == i = c₁ + 1 | otherwise = σ j
             (lo, _) = evalCounter hi σ' ρ
-        in (φ (LoWrite i (φ (LoAdd16 lo₁ lo₂)) lo), undefined)
+        in (φ (LoWrite i (φ (LoAddU16 lo₁ lo₂)) lo), undefined)
       else
         let σ' j | j == i = 2 | otherwise = σ j
             (lo, _) = evalCounter hi σ' ρ
-        in (φ (LoLet U16 (φ (LoAdd16 lo₁ lo₂))
-                (\x -> φ (LoWrite i (bred (φ (LoVar x))) lo))), undefined)
+        in (φ (LoLet U16 (φ (LoAddU16 lo₁ lo₂))
+                (\x -> φ (LoWrite i (exact bred (φ (LoVar x))) lo))), undefined)
   HiSubW i hi₁ hi₂ hi ->
     let (lo₁, c₁) = evalCounter hi₁ σ ρ
         (lo₂, _)  = evalCounter hi₂ σ ρ in
@@ -101,28 +93,37 @@ maxU18 = fromIntegral (1 `shiftL` 18 - 1 :: Word32)
         let σ' j | j == i = c₁ + 1 | otherwise = σ j
             (lo, _) = evalCounter hi σ' ρ
         in (φ (LoWrite i
-                (φ (LoSub16
-                     (φ (LoAdd16 lo₁ (φ (LoLit newHopeQ))))
+                (φ (LoSubU16
+                     (φ (LoAddU16 lo₁ (φ (LoLit newHopeQ))))
                      lo₂))
                  lo),
              undefined)
       else
         let σ' j | j == i = 2 | otherwise = σ j
             (lo, _) = evalCounter hi σ' ρ
-        in (φ (LoLet U16 (φ (LoSub16
-                           (φ (LoAdd16 lo₁ (φ (LoLit newHopeQ))))
+        in (φ (LoLet U16 (φ (LoSubU16
+                           (φ (LoAddU16 lo₁ (φ (LoLit newHopeQ))))
                             lo₂))
-               (\x -> φ (LoWrite i (bred (φ (LoVar x))) lo))), undefined)
+                (\x -> φ (LoWrite i (exact bred (φ (LoVar x))) lo))),
+             undefined)
   where
-    bred x = let u = φ (φ (LoMul32 x (φ (LoLit 5))) `LoAsr` 16)
-             in φ (x `LoSub16` φ (LoU16 (φ (LoMul32 u (φ (LoLit newHopeQ))))))
-    mred x = let s = φ (x `LoBitAnd` maxU18)
-                 r = φ (s `LoMul32` φ (LoLit newHopeQinv))
-                 u = φ (r `LoBitAnd` maxU18)
+    exact f x = φ (LoExact x (f . φ . LoVar))
+    bred x = let u = φ (φ (LoMulU32 x (φ (LoLit 5))) `LoAsr` 16)
+             in φ (x `LoSubU16` φ (LoU16 (φ (LoMulU32 u (φ (LoLit newHopeQ))))))
+    mred x = let s = φ (x `LoMask` 18)
+                 r = φ (s `LoMulU32` φ (LoLit newHopeQinv))
+                 u = φ (r `LoMask` 18)
                in φ (LoU16
-                      (φ (φ (LoAdd32 x
-                               (φ (LoMul32 u (φ (LoLit newHopeQ)))))
+                      (φ (φ (LoAddU32 x
+                               (φ (LoMulU32 u (φ (LoLit newHopeQ)))))
                             `LoAsr` 18)))
+    csub x = φ (LoLet I16
+                 (φ (LoSubI16 (φ (LoI16 x)) (φ (LoLit newHopeQ))))
+                 (\v ->
+                    φ (LoAddU16
+                        (φ (LoVar v))
+                        (φ (LoBitAnd (φ (LoAsr (φ (LoVar v)) 15))
+                             newHopeQ)))))
 
 -- --
 -- -- Lazy Modulo Insertion
@@ -219,9 +220,9 @@ type Ω = Int -> Int
                       (φ (HiSubW (k + j + m `div` 2) (φ (HiVar u)) (φ (HiVar t))
                            x)))))))
 
--- --
--- -- Generating C programs
--- --
+--
+-- Generating C programs
+--
 
 type Name   = String
 type Gensym = State (Int, [String])
@@ -233,6 +234,9 @@ gensym = do i <- gets fst; modify (\(j, s) -> (j + 1, s))
 statement :: String -> Gensym ()
 statement s = modify (second (s :))
 
+maxUint :: Int -> Integer
+maxUint n = fromIntegral (1 `shiftL` n - 1 :: Word32)
+
 φGen :: LoTerm Name (Gensym String) -> Gensym String
 φGen t = case t of
   LoLit i -> return (show i)
@@ -242,11 +246,15 @@ statement s = modify (second (s :))
   LoI16 x -> castM "int16_t" x
   LoAsr x n -> do s <- x; binop ">>" s (show n)
   LoBitAnd x n -> do s <- x; binop "&" s (show n)
-  LoAdd16 x y -> binopM "+" x y
-  LoSub16 x y -> binopM "-" x y
-  LoAdd32 x y ->
+  LoMask x n -> do
+    s <- x
+    return ("(" ++ s ++ " & " ++ show (maxUint n) ++ ")")
+  LoAddU16 x y -> binopM "+" x y
+  LoSubU16 x y -> binopM "-" x y
+  LoSubI16 x y -> binopM "-" x y
+  LoAddU32 x y ->
     binopM "+" (castM "uint32_t" x) (castM "uint32_t" y)
-  LoMul32 x y ->
+  LoMulU32 x y ->
     binopM "*" (castM "uint32_t" x) (castM "uint32_t" y)
   LoSkip -> return "";
   LoLet it x h -> do
@@ -257,6 +265,7 @@ statement s = modify (second (s :))
     res <- x
     statement ("A[" ++ show n ++ "] = " ++ res)
     body
+  LoExact x h -> x >>= h <&> (\s -> "/*EB*/" ++ s ++ "/*EE*/")
   where binop :: Monad m => String -> String -> String -> m String
         binop op a b =
           return ("(" ++ a ++ " " ++ op ++ " " ++ b ++  ")")
@@ -268,7 +277,131 @@ statement s = modify (second (s :))
         castM :: Monad m => String -> m String -> m String
         castM ty = fmap (cast ty)
 
+--
+-- Interval analysis
+--
+
+type Iv = (Integer, Integer)
+type StIv = Int -> Iv
+type EvIv = Integer -> Iv
+newtype IA = IA { evalIA :: StIv -> EvIv
+                  -> StateT (Integer, Int) (Either String) Iv }
+
+(⊆) :: Iv -> Iv -> Bool
+(x₁, y₁) ⊆ (x₂, y₂) = x₂ <= x₁ && y₁ <= y₂
+
+gensymIA :: StateT (Integer, Int) (Either String) Integer
+gensymIA = do i <- gets fst; modify (first succ); return i
+
+assertI :: String -> Iv -> Iv -> StateT (Integer, Int) (Either String) ()
+assertI op i j
+  -- | i ⊆ j = trace (op ++ ": " ++ show i ++ " ⊆ " ++ show j) (return ())
+  | i ⊆ j = return ()
+  | otherwise = lift (Left (op ++ ": " ++ show i ++ " ⊈ " ++ show j))
+
+maxU16 :: Integer
+maxU16 = 65535
+
+ivU16 :: Iv
+ivU16 = (0, 65535)
+
+ivI16 :: Iv
+ivI16 = (-32768, 32767)
+
+ivU32 :: Iv
+ivU32 = (0, 4294967295)
+
+φIA :: LoTerm Integer IA -> IA
+φIA t = IA $ \σ ρ -> case t of
+  LoLit n -> return (m, m) where m = fromIntegral n
+  LoRead i -> return (σ i)
+  LoVar v  -> return (ρ v)
+  LoU16 x -> do iv <- evalIA x σ ρ
+                return (if iv ⊆ ivU16 then iv else ivU16)
+  LoI16 x -> do iv <- evalIA x σ ρ
+                assertI "LoI16" iv ivI16
+                return iv
+  LoAsr x n -> do (a, b) <- evalIA x σ ρ; return (a `asr` n, b `asr` n)
+  LoBitAnd x n -> exactInterv (`bitAnd` fromIntegral n) <$> evalIA x σ ρ
+  LoMask x n -> do iv <- evalIA x σ ρ
+                   let bounds = (0, maxUint n)
+                   return (if iv ⊆ bounds then iv else bounds)
+  LoAddU16 a b -> do iv <- liftM2 (+♯) (evalIA a σ ρ) (evalIA b σ ρ)
+                     assertI "LoAddU16" iv ivU16
+                     return iv
+  LoSubU16 a b -> do iv <- liftM2 (-♯) (evalIA a σ ρ) (evalIA b σ ρ)
+                     assertI "LoSubU16" iv ivU16
+                     return iv
+  LoSubI16 a b -> do iv <- liftM2 (-♯) (evalIA a σ ρ) (evalIA b σ ρ)
+                     assertI "LoSubI16" iv ivI16
+                     return iv
+  LoAddU32 a b -> do iv <- liftM2 (+♯) (evalIA a σ ρ) (evalIA b σ ρ)
+                     assertI "LoAddU32" iv ivU32
+                     return iv
+  LoMulU32 a b -> do iv <- liftM2 (×♯) (evalIA a σ ρ) (evalIA b σ ρ)
+                     assertI "LoMulU32" iv ivU32
+                     return iv
+  LoSkip -> return (0, 0)
+  LoLet it x h -> do iv <- evalIA x σ ρ
+                     let bounds =
+                           case it of U32 -> ivU32; U16 -> ivU16; I16 -> ivI16
+                     assertI "LoLet" iv bounds
+                     name <- gensymIA
+                     let ρ' v | v == name = iv | otherwise = ρ v
+                     evalIA (h name) σ ρ'
+  LoWrite i x h -> do iv <- evalIA x σ ρ
+                      assertI "LoWrite" iv ivU16
+                      lino <- gets snd
+                      traceShow lino (return ())
+                      modify (second succ)
+                      let σ' j | i == j = iv | otherwise = σ j
+                      evalIA h σ' ρ
+  LoExact x h -> do (a, b) <- evalIA x σ ρ
+                    ivs <- sequence (run a :| [ run z | z <- [a + 1 .. b]])
+                    return (minmax (fst <$> ivs))
+                      where run n = do name <- gensymIA
+                                       let ρ' v
+                                             | v == name = (n, n)
+                                             | otherwise = ρ v
+                                       evalIA (h name) σ ρ'
+  where (+♯) :: Iv -> Iv -> Iv
+        (-♯) :: Iv -> Iv -> Iv
+        (×♯) :: Iv -> Iv -> Iv
+        (x₁, y₁) +♯ (x₂, y₂) = (x₁ + x₂, y₁ + y₂)
+        (x₁, y₁) -♯ (x₂, y₂) = (x₁ - y₂, y₁ - x₂)
+        (x₁, y₁) ×♯ (x₂, y₂) = (minimum a, maximum a)
+          where a = [ x₁ * x₂, x₁ * y₂, y₁ * x₂, y₁ * y₂]
+
+bitAnd :: Integer -> Integer -> Integer
+bitAnd = withWord32 (.&.)
+
+asr :: Integer -> Int -> Integer
+asr a b = fromIntegral (fromIntegral a `shiftR` b :: Word32)
+
+withWord32 :: (Word32 -> Word32 -> Word32) -> Integer -> Integer -> Integer
+withWord32 (⊕) a b = fromIntegral (fromIntegral a ⊕ fromIntegral b)
+
+exactInterv :: (Integer -> Integer) -> Iv -> Iv
+exactInterv g (lo, hi) = let glo = g lo in exact glo glo (lo + 1)
+  where exact mi ma i
+          | i > hi = (mi, ma)
+          | otherwise =
+          let j = g i
+              !mi' = min j mi
+              !ma' = max j ma
+          in exact mi' ma' (i + 1)
+
+minmax :: Ord a => NonEmpty a -> (a, a)
+minmax (hd :| tl) = exact hd hd tl
+  where exact mi ma [] = (mi, ma)
+        exact mi ma (x:xs) =
+          let !mi' = min x mi
+              !ma' = max x ma
+          in exact mi' ma' xs
+            
+--
 -- Generator
+--
 
 hylo :: (Functor f) => (f b -> b, a -> f a) -> a -> b
 hylo (φ, ψ) = fix (\f -> φ . fmap f . ψ)
@@ -280,7 +413,7 @@ newHopePrimRoots = Prim.primRootArray $ Prim.PRParam
 
 newHopeNTT :: String
 newHopeNTT =
-  hylo (τUnroll (newHopePrimRoots!) (τInsert (const 4) φGen)
+  hylo ( τUnroll (newHopePrimRoots!) (τInsert (const 4) φGen)
        , ψTrail 10) (1, 0, 0)
   & (\m -> evalCounter m (const 1) undefined)
   & fst & flip execState (0, []) & \(_, ss) ->
@@ -290,3 +423,15 @@ outputNTT :: FilePath -> String -> IO ()
 outputNTT path = writeFile path . wrapHeader . wrapFunc
   where wrapFunc s = "void ntt(uint16_t* A) {\n" ++ s ++ "}"
         wrapHeader = ("#include <stdint.h>\n\n" ++)
+
+--
+-- Analysis
+--
+
+newHopeVerif :: Either String (Iv, (Integer, Int))
+newHopeVerif =
+  hylo ( τUnroll (newHopePrimRoots!) (τInsert (const 4) φIA)
+       , ψTrail 10) (1, 0, 0)
+  & (\m -> evalCounter m (const 1) undefined)
+  & (\(m, _) -> evalIA m (const (0, fromIntegral newHopeQ - 1)) undefined)
+  & flip runStateT (0, 1)

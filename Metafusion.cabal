@@ -13,7 +13,7 @@ extra-doc-files:    CHANGELOG.md
 -- extra-source-files:
 
 common warnings
-    ghc-options: -Wall
+    ghc-options: -Wall -O2
 
 library
     import:           warnings
@@ -30,14 +30,14 @@ library
     hs-source-dirs:   .
     default-language: GHC2021
 
-test-suite Metafusion-test
+test-suite Metafusion-NewHope
     import:           warnings
     default-language: GHC2021
     -- other-modules:
     -- other-extensions:
     type:             exitcode-stdio-1.0
     hs-source-dirs:   test
-    main-is:          Main.hs
+    main-is:          NewHope.hs
     build-depends:
         base ^>=4.17.2.1,
         Metafusion
