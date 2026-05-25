@@ -1,18 +1,17 @@
 
 module LazyModuloInsertion where
 
-import           Control.Monad
-import           Control.Monad.State
-import           Data.Array ((!))
-import qualified Data.Array as A
-import           Data.Bifunctor (first, second)
-import           Data.Bits (shiftL, shiftR, (.&.))
-import           Data.Function (fix, (&))
-import           Data.List.NonEmpty (NonEmpty(..))
-import           Data.Word
-import           Debug.Trace
-import           PrimRoots as Prim
+import Control.Monad
+import Control.Monad.State
+import Data.Array ((!), Array)
+import Data.Bifunctor (first, second)
+import Data.Bits (shiftL, shiftR, (.&.))
+import Data.Function (fix, (&))
 import Data.Functor
+import Data.List.NonEmpty (NonEmpty(..))
+import Data.Word
+import Debug.Trace
+import PrimRoots as Prim
 
 data HiTerm v x
   = HiLit Int | HiRead Int | HiVar v | HiMul x x
@@ -33,7 +32,7 @@ data LoTerm v x
   | LoAddU16 x x | LoSubU16 x x | LoSubI16 x x
   | LoAddU32 x x | LoMulU32 x x
   | LoSkip | LoLet IntType x (v -> x) | LoWrite Int x x
-  | LoExact x (v -> x)
+  | LoExact String x (v -> x)
   deriving Functor
 
 --
@@ -67,7 +66,7 @@ newHopeQinv = 12287
         (lo₂, _) = evalCounter hi₂ σ ρ
     in (,undefined) $
        φ (LoLet U32 (φ (LoMulU32 lo₁ lo₂))
-          (\x -> exact csub (mred (φ (LoVar x)))))
+          (\x -> exact "MRED" csub (mred (φ (LoVar x)))))
   HiSkip -> (φ LoSkip, undefined)
   HiLet hi h ->
     let (lo, c) = evalCounter hi σ ρ
@@ -85,7 +84,8 @@ newHopeQinv = 12287
         let σ' j | j == i = 2 | otherwise = σ j
             (lo, _) = evalCounter hi σ' ρ
         in (φ (LoLet U16 (φ (LoAddU16 lo₁ lo₂))
-                (\x -> φ (LoWrite i (exact bred (φ (LoVar x))) lo))), undefined)
+                (\x -> φ (LoWrite i
+                           (exact "BRED" bred (φ (LoVar x))) lo))), undefined)
   HiSubW i hi₁ hi₂ hi ->
     let (lo₁, c₁) = evalCounter hi₁ σ ρ
         (lo₂, _)  = evalCounter hi₂ σ ρ in
@@ -104,19 +104,19 @@ newHopeQinv = 12287
         in (φ (LoLet U16 (φ (LoSubU16
                            (φ (LoAddU16 lo₁ (φ (LoLit newHopeQ))))
                             lo₂))
-                (\x -> φ (LoWrite i (exact bred (φ (LoVar x))) lo))),
+                (\x -> φ (LoWrite i (exact "BRED" bred (φ (LoVar x))) lo))),
              undefined)
   where
-    exact f x = φ (LoExact x (f . φ . LoVar))
+    exact s f x = φ (LoExact s x (f . φ . LoVar))
     bred x = let u = φ (φ (LoMulU32 x (φ (LoLit 5))) `LoAsr` 16)
              in φ (x `LoSubU16` φ (LoU16 (φ (LoMulU32 u (φ (LoLit newHopeQ))))))
-    mred x = let s = φ (x `LoMask` 18)
+    mred x = let s = φ (x `LoMask` 16)
                  r = φ (s `LoMulU32` φ (LoLit newHopeQinv))
-                 u = φ (r `LoMask` 18)
+                 u = φ (r `LoMask` 16)
                in φ (LoU16
                       (φ (φ (LoAddU32 x
                                (φ (LoMulU32 u (φ (LoLit newHopeQ)))))
-                            `LoAsr` 18)))
+                            `LoAsr` 16)))
     csub x = φ (LoLet I16
                  (φ (LoSubI16 (φ (LoI16 x)) (φ (LoLit newHopeQ))))
                  (\v ->
@@ -265,7 +265,8 @@ maxUint n = fromIntegral (1 `shiftL` n - 1 :: Word32)
     res <- x
     statement ("A[" ++ show n ++ "] = " ++ res)
     body
-  LoExact x h -> x >>= h <&> (\s -> "/*EB*/" ++ s ++ "/*EE*/")
+  LoExact op x h ->
+    x >>= h <&> (\s -> tag ++ s ++ tag) where tag = "/* " ++ op ++ " */"
   where binop :: Monad m => String -> String -> String -> m String
         binop op a b =
           return ("(" ++ a ++ " " ++ op ++ " " ++ b ++  ")")
@@ -356,14 +357,14 @@ ivU32 = (0, 4294967295)
                       modify (second succ)
                       let σ' j | i == j = iv | otherwise = σ j
                       evalIA h σ' ρ
-  LoExact x h -> do (a, b) <- evalIA x σ ρ
-                    ivs <- sequence (run a :| [ run z | z <- [a + 1 .. b]])
-                    return (minmax (fst <$> ivs))
-                      where run n = do name <- gensymIA
-                                       let ρ' v
-                                             | v == name = (n, n)
-                                             | otherwise = ρ v
-                                       evalIA (h name) σ ρ'
+  LoExact _ x h -> do (a, b) <- evalIA x σ ρ
+                      ivs <- sequence (run a :| [ run z | z <- [a + 1 .. b]])
+                      return (minmax (fst <$> ivs))
+                        where run n = do name <- gensymIA
+                                         let ρ' v
+                                               | v == name = (n, n)
+                                               | otherwise = ρ v
+                                         evalIA (h name) σ ρ'
   where (+♯) :: Iv -> Iv -> Iv
         (-♯) :: Iv -> Iv -> Iv
         (×♯) :: Iv -> Iv -> Iv
@@ -398,6 +399,49 @@ minmax (hd :| tl) = exact hd hd tl
           let !mi' = min x mi
               !ma' = max x ma
           in exact mi' ma' xs
+
+--
+-- Couting modulos
+--
+
+newtype Point = Point (Int, Int) deriving Show
+
+instance Semigroup Point where
+  Point (a, b) <> Point (c, d) = Point (a + c, b + d)
+instance Monoid Point where mempty = Point (0, 0)
+
+type Modulos = State Int Point
+
+gensymModulos :: State Int Int
+gensymModulos = do i <- get; modify succ; return i
+
+φModulos :: LoTerm Int Modulos -> Modulos
+φModulos t = case t of
+  LoLit _  -> return mempty
+  LoRead _ -> return mempty
+  LoVar _  -> return mempty
+  LoU16 x      -> x
+  LoI16 x      -> x
+  LoAsr x _    -> x
+  LoBitAnd x _ -> x
+  LoMask x _   -> x
+  LoAddU16 a b -> liftM2 (<>) a b
+  LoSubU16 a b -> liftM2 (<>) a b
+  LoSubI16 a b -> liftM2 (<>) a b
+  LoAddU32 a b -> liftM2 (<>) a b
+  LoMulU32 a b -> liftM2 (<>) a b
+  LoSkip -> return mempty
+  LoLet _ x h -> do i <- gensymModulos; liftM2 (<>) x (h i)
+  LoWrite _ a b -> liftM2 (<>) a b
+  LoExact "BRED" x h -> do
+    i <- gensymModulos
+    m <- liftM2 (<>) x (h i)
+    return (m <> Point (1, 0))
+  LoExact "MRED" x h -> do
+    i <- gensymModulos
+    m <- liftM2 (<>) x (h i)
+    return (m <> Point (0, 1))
+  LoExact _ x h -> do i <- gensymModulos; liftM2 (<>) x (h i)
             
 --
 -- Generator
@@ -406,7 +450,7 @@ minmax (hd :| tl) = exact hd hd tl
 hylo :: (Functor f) => (f b -> b, a -> f a) -> a -> b
 hylo (φ, ψ) = fix (\f -> φ . fmap f . ψ)
 
-newHopePrimRoots :: A.Array Int Int
+newHopePrimRoots :: Array Int Int
 newHopePrimRoots = Prim.primRootArray $ Prim.PRParam
   { Prim.n = 1024, Prim.q    = 12289
   , Prim.ω = 49, Prim.factor = 1 `shiftL` 16 }
@@ -421,8 +465,9 @@ newHopeNTT =
 
 outputNTT :: FilePath -> String -> IO ()
 outputNTT path = writeFile path . wrapHeader . wrapFunc
-  where wrapFunc s = "void ntt(uint16_t* A) {\n" ++ s ++ "}"
-        wrapHeader = ("#include <stdint.h>\n\n" ++)
+  where wrapFunc s = "void ntt(uint16_t* A) {\n  bit_reverse(A);\n" ++ s ++ "}"
+        wrapHeader =
+          ("#include <stdint.h>\n\nvoid bit_reverse(uint16_t*);\n\n" ++)
 
 --
 -- Analysis
@@ -435,3 +480,25 @@ newHopeVerif =
   & (\m -> evalCounter m (const 1) undefined)
   & (\(m, _) -> evalIA m (const (0, fromIntegral newHopeQ - 1)) undefined)
   & flip runStateT (0, 1)
+
+--
+-- Counting
+--
+
+newHopeModulos :: Point
+newHopeModulos =
+  hylo ( τUnroll (newHopePrimRoots!) (τInsert (const 4) φModulos)
+       , ψTrail 10) (1, 0, 0)
+  & (\m -> evalCounter m (const 1) undefined)
+  & (\(m, _) -> evalState m 0)
+
+φTrailToList :: Trail (Int, Int, Int) [(Int, Int, Int)] -> [(Int, Int, Int)]
+φTrailToList tr = case tr of TrHalt -> []; TrNode h t -> h:t
+
+masudaModulos :: Point
+masudaModulos =
+  let trail   = hylo (φTrailToList, ψTrail 10) (1, 0, 0)
+      mred    = length trail
+      bredSub = length trail
+      bredAdd = filter (\(s, _, _) -> s `elem` [3, 6, 9]) trail & length
+  in Point (bredAdd + bredSub, mred)
