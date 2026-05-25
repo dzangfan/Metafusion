@@ -353,7 +353,8 @@ ivU32 = (0, 4294967295)
   LoWrite i x h -> do iv <- evalIA x σ ρ
                       assertI "LoWrite" iv ivU16
                       lino <- gets snd
-                      traceShow lino (return ())
+                      trace ("\ESC[1A\ESC[2K" ++ show lino)
+                        (return ())
                       modify (second succ)
                       let σ' j | i == j = iv | otherwise = σ j
                       evalIA h σ' ρ
@@ -447,6 +448,9 @@ gensymModulos = do i <- get; modify succ; return i
 -- Generator
 --
 
+safeThreshold :: Threshold
+safeThreshold = const 4
+
 hylo :: (Functor f) => (f b -> b, a -> f a) -> a -> b
 hylo (φ, ψ) = fix (\f -> φ . fmap f . ψ)
 
@@ -455,9 +459,9 @@ newHopePrimRoots = Prim.primRootArray $ Prim.PRParam
   { Prim.n = 1024, Prim.q    = 12289
   , Prim.ω = 49, Prim.factor = 1 `shiftL` 16 }
 
-newHopeNTT :: String
-newHopeNTT =
-  hylo ( τUnroll (newHopePrimRoots!) (τInsert (const 4) φGen)
+newHopeNTT :: Threshold -> String
+newHopeNTT θ =
+  hylo ( τUnroll (newHopePrimRoots!) (τInsert θ φGen)
        , ψTrail 10) (1, 0, 0)
   & (\m -> evalCounter m (const 1) undefined)
   & fst & flip execState (0, []) & \(_, ss) ->
@@ -473,9 +477,9 @@ outputNTT path = writeFile path . wrapHeader . wrapFunc
 -- Analysis
 --
 
-newHopeVerif :: Either String (Iv, (Integer, Int))
-newHopeVerif =
-  hylo ( τUnroll (newHopePrimRoots!) (τInsert (const 4) φIA)
+newHopeVerif :: Threshold -> Either String (Iv, (Integer, Int))
+newHopeVerif θ =
+  hylo ( τUnroll (newHopePrimRoots!) (τInsert θ φIA)
        , ψTrail 10) (1, 0, 0)
   & (\m -> evalCounter m (const 1) undefined)
   & (\(m, _) -> evalIA m (const (0, fromIntegral newHopeQ - 1)) undefined)
@@ -485,9 +489,9 @@ newHopeVerif =
 -- Counting
 --
 
-newHopeModulos :: Point
-newHopeModulos =
-  hylo ( τUnroll (newHopePrimRoots!) (τInsert (const 4) φModulos)
+newHopeModulos :: Threshold -> Point
+newHopeModulos θ =
+  hylo ( τUnroll (newHopePrimRoots!) (τInsert θ φModulos)
        , ψTrail 10) (1, 0, 0)
   & (\m -> evalCounter m (const 1) undefined)
   & (\(m, _) -> evalState m 0)
