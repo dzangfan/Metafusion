@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 
 module LazyModuloInsertion where
 
@@ -10,8 +11,8 @@ import Data.Function (fix, (&))
 import Data.Functor
 import Data.List.NonEmpty (NonEmpty(..))
 import Data.Word
-import Debug.Trace
 import PrimRoots as Prim
+import GHC.Exts (inline)
 
 data HiTerm v x
   = HiLit Int | HiRead Int | HiVar v | HiMul x x
@@ -58,130 +59,80 @@ newHopeQinv = 12287
   -> HiTerm v (Counter v x)
   -> Counter v x
 τInsert θ φ t = Counter $ \σ ρ -> case t of
-  HiLit n  -> (φ (LoLit n), undefined)
-  HiRead i -> (φ (LoRead i), σ i)
-  HiVar v  -> (φ (LoVar v), ρ v)
+  HiLit n  -> (inline φ (LoLit n), undefined)
+  HiRead i -> (inline φ (LoRead i), σ i)
+  HiVar v  -> (inline φ (LoVar v), ρ v)
   HiMul hi₁ hi₂ ->
     let (lo₁, _) = evalCounter hi₁ σ ρ
         (lo₂, _) = evalCounter hi₂ σ ρ
     in (,undefined) $
-       φ (LoLet U32 (φ (LoMulU32 lo₁ lo₂))
-          (\x -> exact "MRED" csub (mred (φ (LoVar x)))))
-  HiSkip -> (φ LoSkip, undefined)
+       inline φ (LoLet U32 (inline φ (LoMulU32 lo₁ lo₂))
+          (\x -> inline exact "MRED" csub (mred (inline φ (LoVar x)))))
+  HiSkip -> (inline φ LoSkip, undefined)
   HiLet hi h ->
     let (lo, c) = evalCounter hi σ ρ
         ρ' u v | u == v = c | otherwise = ρ v
         h' v = evalCounter (h v) σ (ρ' v) & fst
-    in (φ (LoLet U16 lo h'), undefined)
+    in (inline φ (LoLet U16 lo h'), undefined)
   HiAddW i hi₁ hi₂ hi ->
     let (lo₁, c₁) = evalCounter hi₁ σ ρ
         (lo₂, _)  = evalCounter hi₂ σ ρ in
       if θ i >= c₁ + 1 then
         let σ' j | j == i = c₁ + 1 | otherwise = σ j
             (lo, _) = evalCounter hi σ' ρ
-        in (φ (LoWrite i (φ (LoAddU16 lo₁ lo₂)) lo), undefined)
+        in (inline φ (LoWrite i (inline φ (LoAddU16 lo₁ lo₂)) lo), undefined)
       else
         let σ' j | j == i = 2 | otherwise = σ j
             (lo, _) = evalCounter hi σ' ρ
-        in (φ (LoLet U16 (φ (LoAddU16 lo₁ lo₂))
-                (\x -> φ (LoWrite i
-                           (exact "BRED" bred (φ (LoVar x))) lo))), undefined)
+        in (inline φ (LoLet U16 (inline φ (LoAddU16 lo₁ lo₂))
+                (\x ->
+                   inline φ (LoWrite i
+                               (inline exact "BRED" bred (inline φ (LoVar x))) lo))),
+             undefined)
   HiSubW i hi₁ hi₂ hi ->
     let (lo₁, c₁) = evalCounter hi₁ σ ρ
         (lo₂, _)  = evalCounter hi₂ σ ρ in
       if θ i >= c₁ + 1 then
         let σ' j | j == i = c₁ + 1 | otherwise = σ j
             (lo, _) = evalCounter hi σ' ρ
-        in (φ (LoWrite i
-                (φ (LoSubU16
-                     (φ (LoAddU16 lo₁ (φ (LoLit newHopeQ))))
+        in (inline φ (LoWrite i
+                        (inline φ (LoSubU16
+                            (inline φ (LoAddU16 lo₁ (φ (LoLit newHopeQ))))
                      lo₂))
                  lo),
              undefined)
       else
         let σ' j | j == i = 2 | otherwise = σ j
             (lo, _) = evalCounter hi σ' ρ
-        in (φ (LoLet U16 (φ (LoSubU16
-                           (φ (LoAddU16 lo₁ (φ (LoLit newHopeQ))))
-                            lo₂))
-                (\x -> φ (LoWrite i (exact "BRED" bred (φ (LoVar x))) lo))),
+        in (inline φ
+            (LoLet U16
+             (inline φ (LoSubU16
+                          (inline φ (LoAddU16 lo₁ (inline φ (LoLit newHopeQ))))
+                          lo₂))
+                (\x -> inline φ (LoWrite i (inline exact "BRED" bred (inline φ (LoVar x))) lo))),
              undefined)
   where
-    exact s f x = φ (LoExact s x (f . φ . LoVar))
-    bred x = let u = φ (φ (LoMulU32 x (φ (LoLit 5))) `LoAsr` 16)
-             in φ (x `LoSubU16` φ (LoU16 (φ (LoMulU32 u (φ (LoLit newHopeQ))))))
-    mred x = let s = φ (x `LoMask` 16)
-                 r = φ (s `LoMulU32` φ (LoLit newHopeQinv))
-                 u = φ (r `LoMask` 16)
-               in φ (LoU16
-                      (φ (φ (LoAddU32 x
-                               (φ (LoMulU32 u (φ (LoLit newHopeQ)))))
+    exact s f x = inline φ (LoExact s x (\v -> inline f (inline φ (LoVar v))))
+    bred x = let u =
+                   inline φ
+                   (inline φ (LoMulU32 x (inline φ (LoLit 5))) `LoAsr` 16)
+             in inline φ (x `LoSubU16` inline φ (LoU16 (inline φ (LoMulU32 u (inline φ (LoLit newHopeQ))))))
+    mred x = let s = inline φ (x `LoMask` 16)
+                 r = inline φ (s `LoMulU32` φ (LoLit newHopeQinv))
+                 u = inline φ (r `LoMask` 16)
+               in inline φ (LoU16
+                      (inline φ
+                       (inline φ (LoAddU32 x
+                                   (inline φ (LoMulU32 u (inline φ (LoLit newHopeQ)))))
                             `LoAsr` 16)))
-    csub x = φ (LoLet I16
-                 (φ (LoSubI16 (φ (LoI16 x)) (φ (LoLit newHopeQ))))
+    csub x = inline φ (LoLet I16
+                 (inline φ (LoSubI16 (inline φ (LoI16 x)) (inline φ (LoLit newHopeQ))))
                  (\v ->
-                    φ (LoAddU16
-                        (φ (LoVar v))
-                        (φ (LoBitAnd (φ (LoAsr (φ (LoVar v)) 15))
-                             newHopeQ)))))
-
--- --
--- -- Lazy Modulo Insertion
--- --
-
--- type Iv   = (Int, Int)
--- type St   = Int -> Iv
--- type Ev v = Eq v => v -> Iv
--- newtype Ins v x
---   = Ins { evalIns :: St -> Ev v -> (x, Iv) }
---   deriving Functor
-
--- τInsert :: forall v. Eq v => Param
---   ->  forall x. (Term v x -> x)
---   -> Term v (Ins v x)
---   -> Ins v x
--- τInsert p φ t = Ins $ \σ ρ -> case t of
---   TLit  n -> (φ (TLit n), (n, n)) ↓ (0, getINTMAX₁ p)
---   TRead i -> (φ (TRead i), σ i)
---   TVar  v -> (φ (TVar v),  ρ v)
---   TModQ e -> evalIns e σ ρ ↓ (0, getQ p - 1)
---   TAdd e₁ e₂ ->
---     let (r₁, iv₁) = evalIns e₁ σ ρ
---         (r₂, iv₂) = evalIns e₂ σ ρ
---     in DT.traceShow (σ 0) (φ (TAdd r₁ r₂), iv₁ +♯ iv₂) ↓ (0, getINTMAX₁ p)
---   TSub e₁ e₂ ->
---     let (r₁, iv₁) = evalIns e₁ σ ρ
---         (r₂, iv₂) = evalIns e₂ σ ρ
---     in (φ (TSub r₁ r₂), iv₁ -♯ iv₂)
---        ↓ (0, getINTMAX₁ p)
---   TMul e₁ e₂ ->
---     let (r₁, iv₁) = evalIns e₁ σ ρ
---         (r₂, iv₂) = evalIns e₂ σ ρ
---     in (φ (TMul r₁ r₂), iv₁ ×♯ iv₂) ↓ (0, getINTMAX₁ p)
---   TSkip -> (φ TSkip, undefined)
---   TLet e h ->
---     let (r, iv) = evalIns e σ ρ ↓ (0, getINTMAX₂ p)
---         h' v    = fst $ evalIns (h v) σ ρ'
---           where ρ' w | w == v = iv | otherwise = ρ w
---     in (φ (TLet r h'), undefined)
---   TWrite i e s ->
---     let (r, iv) = evalIns e σ ρ ↓ (0, getINTMAX₃ p)
---         (s', _) = evalIns s σ' ρ
---           where  σ' j | i == j = iv | otherwise = σ j
---     in (φ (TWrite i r s'), undefined)
---   where (⊆) :: Iv -> Iv -> Bool
---         (+♯) :: Iv -> Iv -> Iv
---         (-♯) :: Iv -> Iv -> Iv
---         (×♯) :: Iv -> Iv -> Iv
---         (e, iv₁) ↓ iv₂
---           | iv₁ ⊆ iv₂ = (e, iv₁)
---           | otherwise = (φ (TModQ e), (0, q - 1))
---           where q = getQ p
---         (x₁, y₁) ⊆ (x₂, y₂) = x₂ <= x₁ && y₁ <= y₂
---         (x₁, y₁) +♯ (x₂, y₂) = (x₁ + x₂, y₁ + y₂)
---         (x₁, y₁) -♯ (x₂, y₂) = (x₁ - y₂, y₁ - x₂)
---         (x₁, y₁) ×♯ (x₂, y₂) = (minimum a, maximum a)
---           where a = [ x₁ * x₂, x₁ * y₂, y₁ * x₂, y₁ * y₂]
+                    inline φ (LoAddU16
+                        (inline φ (LoVar v))
+                        (inline φ (LoBitAnd (inline φ (LoAsr (inline φ (LoVar v)) 15))
+                                    newHopeQ)))))
+{-# INLINE τInsert #-}
 
 --
 -- Generating NTT trail
@@ -207,18 +158,19 @@ type Ω = Int -> Int
 τUnroll :: Ω -> forall v x. (HiTerm v x -> x)
   -> Trail (Int, Int, Int) x -> x
 τUnroll getΩ φ trail = case trail of
-  TrHalt -> φ HiSkip
+  TrHalt -> inline φ HiSkip
   TrNode (s, k, j) x ->
     let m = 2 ^ s; o = 2 ^ (s - 1) - 1 in
-      φ (HiLet (φ (HiRead (k + j)))
+      inline φ (HiLet (inline φ (HiRead (k + j)))
           (\u ->
-          φ (HiLet (φ (HiMul
-                        (φ (HiRead (k + j + m `div` 2)))
-                        (φ (HiLit (getΩ (o + j))))))
+          inline φ (HiLet (inline φ (HiMul
+                        (inline φ (HiRead (k + j + m `div` 2)))
+                        (inline φ (HiLit (getΩ (o + j))))))
                (\t ->
-                  φ (HiAddW (k + j) (φ (HiVar u)) (φ (HiVar t))
-                      (φ (HiSubW (k + j + m `div` 2) (φ (HiVar u)) (φ (HiVar t))
+                  inline φ (HiAddW (k + j) (inline φ (HiVar u)) (inline φ (HiVar t))
+                      (inline φ (HiSubW (k + j + m `div` 2) (inline φ (HiVar u)) (inline φ (HiVar t))
                            x)))))))
+{-# INLINE τUnroll #-}
 
 --
 -- Generating C programs
@@ -290,6 +242,7 @@ newtype IA = IA { evalIA :: StIv -> EvIv
 
 (⊆) :: Iv -> Iv -> Bool
 (x₁, y₁) ⊆ (x₂, y₂) = x₂ <= x₁ && y₁ <= y₂
+{-# INLINE (⊆) #-}
 
 gensymIA :: StateT (Integer, Int) (Either String) Integer
 gensymIA = do i <- gets fst; modify (first succ); return i
@@ -352,9 +305,9 @@ ivU32 = (0, 4294967295)
                      evalIA (h name) σ ρ'
   LoWrite i x h -> do iv <- evalIA x σ ρ
                       assertI "LoWrite" iv ivU16
-                      lino <- gets snd
-                      trace ("\ESC[1A\ESC[2K" ++ show lino)
-                        (return ())
+                      -- lino <- gets snd
+                      -- trace ("\ESC[1A\ESC[2K" ++ show lino)
+                      --   (return ())
                       modify (second succ)
                       let σ' j | i == j = iv | otherwise = σ j
                       evalIA h σ' ρ
@@ -373,6 +326,10 @@ ivU32 = (0, 4294967295)
         (x₁, y₁) -♯ (x₂, y₂) = (x₁ - y₂, y₁ - x₂)
         (x₁, y₁) ×♯ (x₂, y₂) = (minimum a, maximum a)
           where a = [ x₁ * x₂, x₁ * y₂, y₁ * x₂, y₁ * y₂]
+        {-# INLINE (+♯) #-}
+        {-# INLINE (-♯) #-}
+        {-# INLINE (×♯) #-}
+{-# INLINE φIA #-}
 
 bitAnd :: Integer -> Integer -> Integer
 bitAnd = withWord32 (.&.)
@@ -454,6 +411,13 @@ safeThreshold = const 4
 hylo :: (Functor f) => (f b -> b, a -> f a) -> a -> b
 hylo (φ, ψ) = fix (\f -> φ . fmap f . ψ)
 
+ana  :: (Functor f) => (a -> f a) -> a -> Fix f
+cata :: (Functor f) => (f b -> b) -> Fix f -> b
+ana  = hylo . (In, )
+cata = hylo . (,out)
+
+newtype Fix f = In { out :: f (Fix f) }
+
 newHopePrimRoots :: Array Int Int
 newHopePrimRoots = Prim.primRootArray $ Prim.PRParam
   { Prim.n = 1024, Prim.q    = 12289
@@ -484,6 +448,16 @@ newHopeVerif θ =
   & (\m -> evalCounter m (const 1) undefined)
   & (\(m, _) -> evalIA m (const (0, fromIntegral newHopeQ - 1)) undefined)
   & flip runStateT (0, 1)
+
+newHopeVerifNF :: Threshold -> Either String (Iv, (Integer, Int))
+newHopeVerifNF θ = h (1, 0, 0)
+  & (\m -> evalCounter m (const 1) undefined)
+  & (\(m, _) -> evalIA m (const (0, fromIntegral newHopeQ - 1)) undefined)
+  & flip runStateT (0, 1)
+  where h = fmap (cata φIA)
+          . cata (τInsert θ In)
+          . cata (τUnroll (newHopePrimRoots!) In)
+          . ana (ψTrail 10)
 
 --
 -- Counting
