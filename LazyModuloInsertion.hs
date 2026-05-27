@@ -1,18 +1,21 @@
-
+{-# LANGUAGE CPP #-}
 module LazyModuloInsertion where
 
 import Control.Monad
 import Control.Monad.State
 import Data.Array ((!), Array)
-import Data.Bifunctor (first, second)
+import Data.Bifunctor (second)
 import Data.Bits (shiftL, shiftR, (.&.))
 import Data.Function (fix, (&))
 import Data.Functor
 import Data.List.NonEmpty (NonEmpty(..))
 import Data.Word
-import Debug.Trace
 import GHC.Exts (inline)
 import PrimRoots as Prim
+
+#ifdef TRACE
+import Debug.Trace
+#endif
 
 data HiTerm v x
   = HiLit Int | HiRead Int | HiVar v | HiMul x x
@@ -237,21 +240,28 @@ maxUint n = fromIntegral (1 `shiftL` n - 1 :: Word32)
 type Iv = (Integer, Integer)
 type StIv = Int -> Iv
 type EvIv = Integer -> Iv
-newtype IA = IA { evalIA :: StIv -> EvIv
-                  -> StateT (Integer, Int) (Either String) Iv }
+data StoreIv = StoreIv { varPool :: Integer, lino :: Int, focus :: (Int, Int) }
+type StateIv = StateT StoreIv (Either (String, Int))
+newtype IA = IA { evalIA :: StIv -> EvIv -> StateIv Iv }
 
 (⊆) :: Iv -> Iv -> Bool
 (x₁, y₁) ⊆ (x₂, y₂) = x₂ <= x₁ && y₁ <= y₂
 {-# INLINE (⊆) #-}
 
-gensymIA :: StateT (Integer, Int) (Either String) Integer
-gensymIA = do i <- gets fst; modify (first succ); return i
+gensymIA :: StateIv Integer
+gensymIA = do i <- gets varPool
+              modify (\s -> s { varPool = varPool s + 1 })
+              return i
 
-assertI :: String -> Iv -> Iv -> StateT (Integer, Int) (Either String) ()
+assertI :: String -> Iv -> Iv -> StateIv ()
 assertI op i j
   -- | i ⊆ j = trace (op ++ ": " ++ show i ++ " ⊆ " ++ show j) (return ())
   | i ⊆ j = return ()
-  | otherwise = lift (Left (op ++ ": " ++ show i ++ " ⊈ " ++ show j))
+  | otherwise = do f <- gets (fst . focus);
+                   lift (Left (op ++ ": " ++ show i ++ " ⊈ " ++ show j, f))
+
+cache :: Int -> StateIv ()
+cache i = do (_, i1) <- gets focus; modify (\s -> s { focus = (i1, i) })
 
 maxU16 :: Integer
 maxU16 = 65535
@@ -268,7 +278,7 @@ ivU32 = (0, 4294967295)
 φIA :: LoTerm Integer IA -> IA
 φIA t = IA $ \σ ρ -> case t of
   LoLit n -> return (m, m) where m = fromIntegral n
-  LoRead i -> return (σ i)
+  LoRead i -> do cache i; return (σ i)
   LoVar v  -> return (ρ v)
   LoU16 x -> do iv <- evalIA x σ ρ
                 return (if iv ⊆ ivU16 then iv else ivU16)
@@ -305,10 +315,12 @@ ivU32 = (0, 4294967295)
                      evalIA (h name) σ ρ'
   LoWrite i x h -> do iv <- evalIA x σ ρ
                       assertI "LoWrite" iv ivU16
-                      lino <- gets snd
-                      trace ("\ESC[1A\ESC[2K" ++ show lino)
+#ifdef TRACE
+                      l <- gets lino
+                      trace ("\ESC[1A\ESC[2K" ++ show l)
                         (return ())
-                      modify (second succ)
+                      modify (\s -> s { lino = l + 1 })
+#endif
                       let σ' j | i == j = iv | otherwise = σ j
                       evalIA h σ' ρ
   LoExact _ x h -> do (a, b) <- evalIA x σ ρ
@@ -431,29 +443,43 @@ newHopeNTT θ =
   & fst & flip execState (0, []) & \(_, ss) ->
   reverse ss & map (\s -> "  " ++ s ++ ";\n") & join
 
-outputNTT :: FilePath -> String -> IO ()
-outputNTT path = writeFile path . wrapHeader . wrapFunc
+newHopeNTTNF :: Threshold -> String
+newHopeNTTNF θ =
+  h (1, 0, 0)
+  & (\m -> evalCounter m (const 1) undefined)
+  & fst & flip execState (0, []) & \(_, ss) ->
+  reverse ss & map (\s -> "  " ++ s ++ ";\n") & join
+  where h = fmap (cata φGen)
+          . cata (τInsert θ In)
+          . cata (τUnroll (newHopePrimRoots!) In)
+          . ana (ψTrail 1024 10)
+
+outputNTT :: FilePath -> [String] -> String -> IO ()
+outputNTT path header = writeFile path . wrapHeader . wrapFunc
   where wrapFunc s = "void ntt(uint16_t* A) {\n  bit_reverse(A);\n" ++ s ++ "}"
-        wrapHeader =
-          ("#include <stdint.h>\n\nvoid bit_reverse(uint16_t*);\n\n" ++)
+        wrapHeader = (header' ++)
+        header' = header
+          & map ("// " ++)
+          & (++ ["\n#include <stdint.h>\n", "void bit_reverse(uint16_t*);\n"])
+          & unlines
 
 --
 -- Analysis
 --
 
-newHopeVerif :: Threshold -> Either String (Iv, (Integer, Int))
+newHopeVerif :: Threshold -> Either (String, Int) (Iv, StoreIv)
 newHopeVerif θ =
   hylo ( τUnroll (newHopePrimRoots!) (τInsert θ φIA)
        , ψTrail 1024 10) (1, 0, 0)
   & (\m -> evalCounter m (const 1) undefined)
   & (\(m, _) -> evalIA m (const (0, fromIntegral newHopeQ - 1)) undefined)
-  & flip runStateT (0, 1)
+  & flip runStateT (StoreIv { varPool = 0, lino = 1, focus = (0, 0) })
 
-newHopeVerifNF :: Threshold -> Either String (Iv, (Integer, Int))
+newHopeVerifNF :: Threshold -> Either (String, Int) (Iv, StoreIv)
 newHopeVerifNF θ = h (1, 0, 0)
   & (\m -> evalCounter m (const 1) undefined)
   & (\(m, _) -> evalIA m (const (0, fromIntegral newHopeQ - 1)) undefined)
-  & flip runStateT (0, 1)
+  & flip runStateT (StoreIv { varPool = 0, lino = 1, focus = (0, 0) })
   where h = fmap (cata φIA)
           . cata (τInsert θ In)
           . cata (τUnroll (newHopePrimRoots!) In)
@@ -469,6 +495,16 @@ newHopeModulos θ =
        , ψTrail 1024 10) (1, 0, 0)
   & (\m -> evalCounter m (const 1) undefined)
   & (\(m, _) -> evalState m 0)
+
+newHopeModulosNF :: Threshold -> Point
+newHopeModulosNF θ =
+  h (1, 0, 0)
+  & (\m -> evalCounter m (const 1) undefined)
+  & (\(m, _) -> evalState m 0)
+  where h = fmap (cata φModulos)
+          . cata (τInsert θ In)
+          . cata (τUnroll (newHopePrimRoots!) In)
+          . ana (ψTrail 1024 10)
 
 φTrailToList :: Trail (Int, Int, Int) [(Int, Int, Int)] -> [(Int, Int, Int)]
 φTrailToList tr = case tr of TrHalt -> []; TrNode h t -> h:t

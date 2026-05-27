@@ -17,6 +17,7 @@ common warnings
 
 library
     import:           warnings
+    -- cpp-options: -DTRACE
     exposed-modules:
         Metafusion,
         LazyModuloInsertion
@@ -25,7 +26,7 @@ library
     -- other-extensions:
     build-depends:
         base  ^>=4.17.2.1,
-        array ^>=0.5.8.0,
+        array ^>=0.5.4.0,
         mtl   ^>=2.3.2
     hs-source-dirs:   .
     default-language: GHC2021
@@ -40,7 +41,8 @@ test-suite Metafusion-NewHope
     main-is:          NewHope.hs
     build-depends:
         base ^>=4.17.2.1,
-        Metafusion
+        Metafusion,
+        criterion ^>=1.6.0.0
 
 test-suite Metafusion-NewHopeAggressive
     import:           warnings
@@ -52,4 +54,5 @@ test-suite Metafusion-NewHopeAggressive
     main-is:          NewHopeAggressive.hs
     build-depends:
         base ^>=4.17.2.1,
+        mtl ^>=2.3.2,
         Metafusion

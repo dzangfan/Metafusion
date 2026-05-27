@@ -1,18 +1,18 @@
-{-# LANGUAGE LambdaCase #-}
-
 module Main (main) where
 
+import Criterion.Main
 import LazyModuloInsertion
 
-θ :: Threshold
-θ x
-  | x `elem` [95,223,351,479,607,735,863,991,190,446,702,958,380,892,760] = 5
-  | otherwise = 4
-
 main :: IO ()
-main = do
-  putStrLn $
-    case newHopeVerif safeThreshold of
-      Left s -> "Dead. " ++ s
-      Right _ -> "OK. " ++ show (newHopeModulos safeThreshold)
+main = defaultMain
+  [
+    bgroup "GP" [ bench "F"  $ nf newHopeNTT safeThreshold
+               , bench "NF" $ nf newHopeNTT safeThreshold ]
+  -- , bgroup "IA" [ bench "F"  $ whnf newHopeVerif safeThreshold
+  --               , bench "NF" $ whnf newHopeVerifNF safeThreshold ]
+  , bgroup "CM" [ bench "F"  $ nf (pointNF.newHopeModulos) safeThreshold
+                , bench "NF" $ nf (pointNF.newHopeModulosNF) safeThreshold ]
+  ]
   
+pointNF :: Point -> Int
+pointNF (Point (a, b)) = a + b
