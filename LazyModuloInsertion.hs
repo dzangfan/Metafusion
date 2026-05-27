@@ -11,8 +11,9 @@ import Data.Function (fix, (&))
 import Data.Functor
 import Data.List.NonEmpty (NonEmpty(..))
 import Data.Word
-import PrimRoots as Prim
+import Debug.Trace
 import GHC.Exts (inline)
+import PrimRoots as Prim
 
 data HiTerm v x
   = HiLit Int | HiRead Int | HiVar v | HiMul x x
@@ -140,11 +141,11 @@ newHopeQinv = 12287
 
 data Trail a x = TrHalt | TrNode a x deriving Functor
 
-ψTrail :: Int -> (Int, Int, Int) -> Trail (Int, Int, Int) (Int, Int, Int)
-ψTrail logN (s, k, j)
-  | s <= logN && k <= m - 1 && j <= o = TrNode (s, k, j) (s, k, j + 1)
-  | s <= logN && k <= m - 1           = ψTrail logN (s, k + m, 0)
-  | s <= logN                         = ψTrail logN (s + 1, 0, 0)
+ψTrail :: Int -> Int -> (Int, Int, Int) -> Trail (Int, Int, Int) (Int, Int, Int)
+ψTrail n logN (s, k, j)
+  | s <= logN && k <= n - 1 && j <= o = TrNode (s, k, j) (s, k, j + 1)
+  | s <= logN && k <= n - 1           = ψTrail n logN (s, k + m, 0)
+  | s <= logN                         = ψTrail n logN (s + 1, 0, 0)
   | otherwise                         = TrHalt
   where m = 2 ^ s
         o = 2 ^ (s - 1) - 1
@@ -305,9 +306,9 @@ ivU32 = (0, 4294967295)
                      evalIA (h name) σ ρ'
   LoWrite i x h -> do iv <- evalIA x σ ρ
                       assertI "LoWrite" iv ivU16
-                      -- lino <- gets snd
-                      -- trace ("\ESC[1A\ESC[2K" ++ show lino)
-                      --   (return ())
+                      lino <- gets snd
+                      trace ("\ESC[1A\ESC[2K" ++ show lino)
+                        (return ())
                       modify (second succ)
                       let σ' j | i == j = iv | otherwise = σ j
                       evalIA h σ' ρ
@@ -426,7 +427,7 @@ newHopePrimRoots = Prim.primRootArray $ Prim.PRParam
 newHopeNTT :: Threshold -> String
 newHopeNTT θ =
   hylo ( τUnroll (newHopePrimRoots!) (τInsert θ φGen)
-       , ψTrail 10) (1, 0, 0)
+       , ψTrail 1024 10) (1, 0, 0)
   & (\m -> evalCounter m (const 1) undefined)
   & fst & flip execState (0, []) & \(_, ss) ->
   reverse ss & map (\s -> "  " ++ s ++ ";\n") & join
@@ -444,7 +445,7 @@ outputNTT path = writeFile path . wrapHeader . wrapFunc
 newHopeVerif :: Threshold -> Either String (Iv, (Integer, Int))
 newHopeVerif θ =
   hylo ( τUnroll (newHopePrimRoots!) (τInsert θ φIA)
-       , ψTrail 10) (1, 0, 0)
+       , ψTrail 1024 10) (1, 0, 0)
   & (\m -> evalCounter m (const 1) undefined)
   & (\(m, _) -> evalIA m (const (0, fromIntegral newHopeQ - 1)) undefined)
   & flip runStateT (0, 1)
@@ -457,7 +458,7 @@ newHopeVerifNF θ = h (1, 0, 0)
   where h = fmap (cata φIA)
           . cata (τInsert θ In)
           . cata (τUnroll (newHopePrimRoots!) In)
-          . ana (ψTrail 10)
+          . ana (ψTrail 1024 10)
 
 --
 -- Counting
@@ -466,7 +467,7 @@ newHopeVerifNF θ = h (1, 0, 0)
 newHopeModulos :: Threshold -> Point
 newHopeModulos θ =
   hylo ( τUnroll (newHopePrimRoots!) (τInsert θ φModulos)
-       , ψTrail 10) (1, 0, 0)
+       , ψTrail 1024 10) (1, 0, 0)
   & (\m -> evalCounter m (const 1) undefined)
   & (\(m, _) -> evalState m 0)
 
@@ -475,7 +476,7 @@ newHopeModulos θ =
 
 masudaModulos :: Point
 masudaModulos =
-  let trail   = hylo (φTrailToList, ψTrail 10) (1, 0, 0)
+  let trail   = hylo (φTrailToList, ψTrail 1024 10) (1, 0, 0)
       mred    = length trail
       bredSub = length trail
       bredAdd = filter (\(s, _, _) -> s `elem` [3, 6, 9]) trail & length

@@ -15,5 +15,7 @@ newHopeNTT.o: newHopeNTT.c
 newHopeNTTMasuda.o: newHopeNTTMasuda.c
 	gcc -c $< -o $@
 
+debug: newHopeNTT_debug.c
+
 clean:
 	rm $(OBJS) nttTest
