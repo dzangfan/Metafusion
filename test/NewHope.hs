@@ -12,7 +12,7 @@ import LazyModuloInsertion
 main :: IO ()
 main = do
   putStrLn $
-    case newHopeVerifNF safeThreshold of
+    case newHopeVerif safeThreshold of
       Left s -> "Dead. " ++ s
       Right _ -> "OK. " ++ show (newHopeModulos safeThreshold)
   
