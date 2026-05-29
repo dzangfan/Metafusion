@@ -25,7 +25,7 @@ library
         PrimRoots
     -- other-extensions:
     build-depends:
-        base  ^>=4.17.2.1,
+        base  >=4.17 && <4.21,
         array ^>=0.5.4.0,
         mtl   ^>=2.3.2
     hs-source-dirs:   .
@@ -40,7 +40,7 @@ test-suite Metafusion-NewHope
     hs-source-dirs:   test
     main-is:          NewHope.hs
     build-depends:
-        base ^>=4.17.2.1,
+        base >=4.17 && <4.21,
         Metafusion,
         criterion ^>=1.6.0.0
 
@@ -53,6 +53,6 @@ test-suite Metafusion-NewHopeAggressive
     hs-source-dirs:   test
     main-is:          NewHopeAggressive.hs
     build-depends:
-        base ^>=4.17.2.1,
+        base >=4.17 && <4.21,
         mtl ^>=2.3.2,
         Metafusion
