@@ -6,12 +6,13 @@ import Control.Monad.State
 import Data.Array ((!), Array)
 import Data.Bifunctor (second)
 import Data.Bits (shiftL, shiftR, (.&.))
-import Data.Function (fix, (&))
+import Data.Function ((&))
 import Data.Functor
 import Data.List.NonEmpty (NonEmpty(..))
 import Data.Word
 import GHC.Exts (inline)
 import PrimRoots as Prim
+import Zoo
 
 #ifdef TRACE
 import Debug.Trace
@@ -419,16 +420,6 @@ gensymModulos = do i <- get; modify succ; return i
 
 safeThreshold :: Threshold
 safeThreshold = const 4
-
-hylo :: (Functor f) => (f b -> b, a -> f a) -> a -> b
-hylo (φ, ψ) = fix (\f -> φ . fmap f . ψ)
-
-ana  :: (Functor f) => (a -> f a) -> a -> Fix f
-cata :: (Functor f) => (f b -> b) -> Fix f -> b
-ana  = hylo . (In, )
-cata = hylo . (,out)
-
-newtype Fix f = In { out :: f (Fix f) }
 
 newHopePrimRoots :: Array Int Int
 newHopePrimRoots = Prim.primRootArray $ Prim.PRParam

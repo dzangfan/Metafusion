@@ -19,7 +19,7 @@ library
     import:           warnings
     -- cpp-options: -DTRACE
     exposed-modules:
-        Metafusion,
+        Zoo,
         LazyModuloInsertion
     other-modules:
         PrimRoots
