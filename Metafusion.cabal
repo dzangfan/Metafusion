@@ -20,14 +20,19 @@ library
     -- cpp-options: -DTRACE
     exposed-modules:
         Zoo,
-        LazyModuloInsertion
+        LazyModuloInsertion,
+        ShortestPath
     other-modules:
         PrimRoots
-    -- other-extensions:
     build-depends:
         base  >=4.17 && <4.21,
         array ^>=0.5.4.0,
-        mtl   ^>=2.3.2
+        mtl   ^>=2.3.2,
+        unordered-containers ^>=0.2.20,
+        hashable ^>=1.4,
+        template-haskell >=2.19 && <2.24,
+        matrix ^>=0.3.6,
+        vector ^>=0.13.0
     hs-source-dirs:   .
     default-language: GHC2021
 
@@ -56,3 +61,39 @@ test-suite Metafusion-NewHopeAggressive
         base >=4.17 && <4.21,
         mtl ^>=2.3.2,
         Metafusion
+
+test-suite Metafusion-ShortestPathBench
+    import:           warnings
+    default-language: GHC2021
+    -- other-modules:
+    -- other-extensions:
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   test
+    main-is:          ShortestPathBench.hs
+    build-depends:
+        base >=4.17 && <4.21,
+        Metafusion,
+        criterion ^>=1.6.0.0,
+        template-haskell >=2.19 && <2.24,
+        matrix ^>=0.3.6,
+        vector ^>=0.13.0,
+        matrix-market-attoparsec ^>=0.1.1,
+        unordered-containers ^>=0.2.20
+
+test-suite Metafusion-ShortestPathBenchC
+    import:           warnings
+    default-language: GHC2021
+    -- other-modules:
+    -- other-extensions:
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   test
+    main-is:          ShortestPathBenchC.hs
+    build-depends:
+        base >=4.17 && <4.21,
+        Metafusion,
+        criterion ^>=1.6.0.0,
+        template-haskell >=2.19 && <2.24,
+        matrix ^>=0.3.6,
+        vector ^>=0.13.0,
+        matrix-market-attoparsec ^>=0.1.1,
+        unordered-containers ^>=0.2.20

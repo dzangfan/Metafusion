@@ -86,7 +86,7 @@ newHopeQinv = 12287
             (lo, _) = evalCounter hi σ' ρ
         in (inline φ (LoWrite i (inline φ (LoAddU16 lo₁ lo₂)) lo), undefined)
       else
-        let σ' j | j == i = 2 | otherwise = σ j
+        let σ' j | j == i = 1 | otherwise = σ j
             (lo, _) = evalCounter hi σ' ρ
         in (inline φ (LoLet U16 (inline φ (LoAddU16 lo₁ lo₂))
                 (\x ->
@@ -106,7 +106,7 @@ newHopeQinv = 12287
                  lo),
              undefined)
       else
-        let σ' j | j == i = 2 | otherwise = σ j
+        let σ' j | j == i = 1 | otherwise = σ j
             (lo, _) = evalCounter hi σ' ρ
         in (inline φ
             (LoLet U16
