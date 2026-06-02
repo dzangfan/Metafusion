@@ -31,12 +31,12 @@ main = do
   case r of
     Nothing -> putStrLn "Failed."
     Just θ -> do
-      let p@(Point (bred, mred)) = newHopeModulos θ
+      let p@(Point (bredN, mredN)) = newHopeModulos θ
       putStrLn ("Ok. " ++ show p)
       let threshold = [i | i <- [0..1023], θ i > 4]
       outputNTT ("c/newHopeNTT" ++ show c ++ ".c")
-        [ "Barrett Reduction: " ++ show bred
-        , "Montgomery Reduction: " ++ show mred
+        [ "Barrett Reduction: " ++ show bredN
+        , "Montgomery Reduction: " ++ show mredN
         , show threshold ]
         (newHopeNTT θ)
       putStrLn "Done."

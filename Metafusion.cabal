@@ -49,6 +49,18 @@ test-suite Metafusion-NewHope
         Metafusion,
         criterion ^>=1.6.0.0
 
+test-suite Metafusion-NewHopeHandmade
+    import:           warnings
+    default-language: GHC2021
+    -- other-modules:
+    -- other-extensions:
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   test
+    main-is:          NewHopeHandmade.hs
+    build-depends:
+        base >=4.17 && <4.21,
+        Metafusion
+
 test-suite Metafusion-NewHopeAggressive
     import:           warnings
     default-language: GHC2021
