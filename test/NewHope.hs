@@ -4,7 +4,8 @@ import Criterion.Main
 import LazyModuloInsertion
 
 main :: IO ()
-main = defaultMain
+main = 
+  defaultMain
   [
     bgroup "GP" [ bench "F"  $ nf newHopeNTT safeThreshold
                , bench "NF" $ nf newHopeNTT safeThreshold ]

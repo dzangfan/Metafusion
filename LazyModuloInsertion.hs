@@ -59,92 +59,95 @@ newHopeQ = 12289
 newHopeQinv :: Int
 newHopeQinv = 12287
 
+undef :: Int
+undef = 0
+
 τInsert :: forall v. Eq v => Threshold ->
   forall x. (LoTerm v x -> x)
   -> HiTerm v (Counter v x)
   -> Counter v x
 τInsert θ φ t = Counter $ \σ ρ -> case t of
-  HiLit n  -> (φ (LoLit n), undefined)
-  HiRead i -> (φ (LoRead i), σ i)
-  HiVar v  -> (φ (LoVar v), ρ v)
+  HiLit n  -> (inline φ (LoLit n), undef)
+  HiRead i -> (inline φ (LoRead i), σ i)
+  HiVar v  -> (inline φ (LoVar v), ρ v)
   HiMul hi₁ hi₂ ->
     let (lo₁, _) = evalCounter hi₁ σ ρ
         (lo₂, _) = evalCounter hi₂ σ ρ
-    in (,undefined) $
-       φ (LoLet U32 (φ (LoMulU32 lo₁ lo₂))
-          (\x -> exact φ "MRED" (csub φ) (mred φ (φ (LoVar x)))))
-  HiSkip -> (φ LoSkip, undefined)
+    in (,undef) $
+       inline φ (LoLet U32 (inline φ (LoMulU32 lo₁ lo₂))
+          (\x -> exact φ "MRED" (csub φ) (mred φ (inline φ (LoVar x)))))
+  HiSkip -> (inline φ LoSkip, undef)
   HiLet hi h ->
     let (lo, c) = evalCounter hi σ ρ
         ρ' u v | u == v = c | otherwise = ρ v
         h' v = evalCounter (h v) σ (ρ' v) & fst
-    in (φ (LoLet U16 lo h'), undefined)
+    in (inline φ (LoLet U16 lo h'), undef)
   HiAddW _ i hi₁ hi₂ hi ->
     let (lo₁, c₁) = evalCounter hi₁ σ ρ
         (lo₂, _)  = evalCounter hi₂ σ ρ in
       if θ i >= c₁ + 1 then
         let σ' j | j == i = c₁ + 1 | otherwise = σ j
             (lo, _) = evalCounter hi σ' ρ
-        in (φ (LoWrite i (φ (LoAddU16 lo₁ lo₂)) lo), undefined)
+        in (inline φ (LoWrite i (inline φ (LoAddU16 lo₁ lo₂)) lo), undef)
       else
         let σ' j | j == i = 1 | otherwise = σ j
             (lo, _) = evalCounter hi σ' ρ
-        in (φ (LoLet U16 (φ (LoAddU16 lo₁ lo₂))
+        in (inline φ (LoLet U16 (inline φ (LoAddU16 lo₁ lo₂))
                 (\x ->
-                   φ (LoWrite i
-                               (exact φ "BRED" (bred φ) (φ (LoVar x))) lo))),
-             undefined)
+                   inline φ (LoWrite i
+                               (exact φ "BRED" (bred φ) (inline φ (LoVar x))) lo))),
+             undef)
   HiSubW _ i hi₁ hi₂ hi ->
     let (lo₁, c₁) = evalCounter hi₁ σ ρ
         (lo₂, _)  = evalCounter hi₂ σ ρ in
       if θ i >= c₁ + 1 then
         let σ' j | j == i = c₁ + 1 | otherwise = σ j
             (lo, _) = evalCounter hi σ' ρ
-        in (φ (LoWrite i
-                        (φ (LoSubU16
-                            (φ (LoAddU16 lo₁ (φ (LoLit newHopeQ))))
+        in (inline φ (LoWrite i
+                        (inline φ (LoSubU16
+                            (inline φ (LoAddU16 lo₁ (inline φ (LoLit newHopeQ))))
                      lo₂))
                  lo),
-             undefined)
+             undef)
       else
         let σ' j | j == i = 1 | otherwise = σ j
             (lo, _) = evalCounter hi σ' ρ
-        in (φ
+        in (inline φ
             (LoLet U16
-             (φ (LoSubU16
-                          (φ (LoAddU16 lo₁ (φ (LoLit newHopeQ))))
+             (inline φ (LoSubU16
+                          (inline φ (LoAddU16 lo₁ (inline φ (LoLit newHopeQ))))
                           lo₂))
-                (\x -> φ (LoWrite i (exact φ "BRED" (bred φ) (φ (LoVar x))) lo))),
-             undefined)
+                (\x -> inline φ (LoWrite i (exact φ "BRED" (bred φ) (inline φ (LoVar x))) lo))),
+             undef)
 {-# INLINE τInsert #-}
 
 exact :: forall v x. (LoTerm v x -> x) -> String -> (x -> x) -> x -> x
-exact φ s f x = φ (LoExact s x (\v -> f (φ (LoVar v))))
+exact φ s f x = inline φ (LoExact s x (\v -> f (inline φ (LoVar v))))
 {-# INLINE exact #-}
 
 bred :: forall v x. (LoTerm v x -> x) -> x -> x
 bred φ x =
-  let u = φ (φ (LoMulU32 x (φ (LoLit 5))) `LoAsr` 16)
-  in φ (x `LoSubU16` φ (LoU16 (φ (LoMulU32 u (φ (LoLit newHopeQ))))))
+  let u = inline φ (inline φ (LoMulU32 x (inline φ (LoLit 5))) `LoAsr` 16)
+  in inline φ (x `LoSubU16` inline φ (LoU16 (inline φ (LoMulU32 u (inline φ (LoLit newHopeQ))))))
 {-# INLINE bred #-}
 
 mred :: forall v x. (LoTerm v x -> x) -> x -> x
 mred φ x =
-  let s = φ (x `LoMask` 16)
-      r = φ (s `LoMulU32` φ (LoLit newHopeQinv))
-      u = φ (r `LoMask` 16)
-  in φ (LoU16 (φ (φ (LoAddU32 x (φ (LoMulU32 u (φ (LoLit newHopeQ)))))
+  let s = inline φ (x `LoMask` 16)
+      r = inline φ (s `LoMulU32` inline φ (LoLit newHopeQinv))
+      u = inline φ (r `LoMask` 16)
+  in inline φ (LoU16 (inline φ (inline φ (LoAddU32 x (inline φ (LoMulU32 u (inline φ (LoLit newHopeQ)))))
                     `LoAsr` 16)))
 {-# INLINE mred #-}
 
 csub :: forall v x. (LoTerm v x -> x) -> x -> x
 csub φ x =
-  φ (LoLet I16
-       (φ (LoSubI16 (φ (LoI16 x)) (φ (LoLit newHopeQ))))
+  inline φ (LoLet I16
+       (inline φ (LoSubI16 (inline φ (LoI16 x)) (inline φ (LoLit newHopeQ))))
        (\v ->
-           φ (LoAddU16
-                (φ (LoVar v))
-                (φ (LoBitAnd (φ (LoAsr (φ (LoVar v)) 15)) newHopeQ)))))
+           inline φ (LoAddU16
+                (inline φ (LoVar v))
+                (inline φ (LoBitAnd (inline φ (LoAsr (inline φ (LoVar v)) 15)) newHopeQ)))))
 {-# INLINE csub #-}
 
 --
@@ -440,14 +443,14 @@ newHopeNTT :: Threshold -> String
 newHopeNTT θ =
   hylo ( τUnroll (newHopePrimRoots!) (τInsert θ φGen)
        , ψTrail 1024 10) (1, 0, 0)
-  & (\m -> evalCounter m (const 1) undefined)
+  & (\m -> evalCounter m (const 1) (const undef))
   & fst & flip execState (0, []) & \(_, ss) ->
   reverse ss & map (\s -> "  " ++ s ++ ";\n") & join
 
 newHopeNTTNF :: Threshold -> String
 newHopeNTTNF θ =
   h (1, 0, 0)
-  & (\m -> evalCounter m (const 1) undefined)
+  & (\m -> evalCounter m (const 1) (const undef))
   & fst & flip execState (0, []) & \(_, ss) ->
   reverse ss & map (\s -> "  " ++ s ++ ";\n") & join
   where h = fmap (cata φGen)
@@ -472,14 +475,14 @@ newHopeVerif :: Threshold -> Either (String, Int) (Iv, StoreIv)
 newHopeVerif θ =
   hylo ( τUnroll (newHopePrimRoots!) (τInsert θ φIA)
        , ψTrail 1024 10) (1, 0, 0)
-  & (\m -> evalCounter m (const 1) undefined)
-  & (\(m, _) -> evalIA m (const (0, fromIntegral newHopeQ - 1)) undefined)
+  & (\m -> evalCounter m (const 1) (const undef))
+  & (\(m, _) -> evalIA m (const (0, fromIntegral newHopeQ - 1)) (\_ -> undefined))
   & flip runStateT (StoreIv { varPool = 0, lino = 1, focus = (0, 0) })
 
 newHopeVerifNF :: Threshold -> Either (String, Int) (Iv, StoreIv)
 newHopeVerifNF θ = h (1, 0, 0)
-  & (\m -> evalCounter m (const 1) undefined)
-  & (\(m, _) -> evalIA m (const (0, fromIntegral newHopeQ - 1)) undefined)
+  & (\m -> evalCounter m (const 1) (const undef))
+  & (\(m, _) -> evalIA m (const (0, fromIntegral newHopeQ - 1)) (\_ -> undefined))
   & flip runStateT (StoreIv { varPool = 0, lino = 1, focus = (0, 0) })
   where h = fmap (cata φIA)
           . cata (τInsert θ In)
@@ -494,13 +497,13 @@ newHopeModulos :: Threshold -> Point
 newHopeModulos θ =
   hylo ( τUnroll (newHopePrimRoots!) (τInsert θ φModulos)
        , ψTrail 1024 10) (1, 0, 0)
-  & (\m -> evalCounter m (const 1) undefined)
+  & (\m -> evalCounter m (const 1) (const undef))
   & (\(m, _) -> evalState m 0)
 
 newHopeModulosNF :: Threshold -> Point
 newHopeModulosNF θ =
   h (1, 0, 0)
-  & (\m -> evalCounter m (const 1) undefined)
+  & (\m -> evalCounter m (const 1) (const undef))
   & (\(m, _) -> evalState m 0)
   where h = fmap (cata φModulos)
           . cata (τInsert θ In)
@@ -524,28 +527,28 @@ masudaModulos =
 
 τHandmade :: forall v x. (LoTerm v x -> x) -> HiTerm v x -> x
 τHandmade φ e = case e of
-  HiLit  n -> φ (LoLit n)
-  HiRead i -> φ (LoRead i)
-  HiVar  v -> φ (LoVar v)
-  HiMul a b -> φ (LoLet U32 (φ (LoMulU32 a b))
-                   (\x -> exact φ "MRED" (csub φ) (mred φ (φ (LoVar x)))))
-  HiSkip -> φ LoSkip
-  HiLet x h -> φ (LoLet U16 x h)
+  HiLit  n -> inline φ (LoLit n)
+  HiRead i -> inline φ (LoRead i)
+  HiVar  v -> inline φ (LoVar v)
+  HiMul a b -> inline φ (LoLet U32 (inline φ (LoMulU32 a b))
+                   (\x -> exact φ "MRED" (csub φ) (mred φ (inline φ (LoVar x)))))
+  HiSkip -> inline φ LoSkip
+  HiLet x h -> inline φ (LoLet U16 x h)
   HiAddW s i u t h
     | pred s i ->
-      φ (LoLet U16 (φ (LoAddU16 u t))
+      inline φ (LoLet U16 (inline φ (LoAddU16 u t))
            (\x ->
-               φ (LoWrite i
-                    (exact φ "BRED" (bred φ) (φ (LoVar x))) h)))
+               inline φ (LoWrite i
+                    (exact φ "BRED" (bred φ) (inline φ (LoVar x))) h)))
     | otherwise ->
-      φ (LoWrite i (φ (LoAddU16 u t)) h)
+      inline φ (LoWrite i (inline φ (LoAddU16 u t)) h)
   HiSubW s i u t h
     | pred s i ->
-      φ (LoLet U16
-           (φ (LoSubU16 (φ (LoAddU16 u (φ (LoLit newHopeQ)))) t))
-           (\x -> φ (LoWrite i (exact φ "BRED" (bred φ) (φ (LoVar x))) h)))
+      inline φ (LoLet U16
+           (inline φ (LoSubU16 (inline φ (LoAddU16 u (inline φ (LoLit newHopeQ)))) t))
+           (\x -> inline φ (LoWrite i (exact φ "BRED" (bred φ) (inline φ (LoVar x))) h)))
     | otherwise ->
-      φ (LoWrite i (φ (LoSubU16 (φ (LoAddU16 u (φ (LoLit newHopeQ)))) t)) h)
+      inline φ (LoWrite i (inline φ (LoSubU16 (inline φ (LoAddU16 u (inline φ (LoLit newHopeQ)))) t)) h)
   where pred :: Int -> Int -> Bool
         pred s i = (s `mod` 4 == 0) && (i `mod` (2 ^ (s + 1)) < 2 ^ s)
 {-# INLINE τHandmade #-}
@@ -561,7 +564,7 @@ handmadeVerif :: Either (String, Int) (Iv, StoreIv)
 handmadeVerif =
   hylo ( τUnroll (newHopePrimRoots!) (τHandmade φIA)
        , ψTrail 1024 10) (1, 0, 0)
-  & (\m -> evalIA m (const (0, fromIntegral newHopeQ - 1)) undefined)
+  & (\m -> evalIA m (const (0, fromIntegral newHopeQ - 1)) (\_ -> undefined))
   & flip runStateT (StoreIv { varPool = 0, lino = 1, focus = (0, 0) })
 
 handmadeModulos :: Point
