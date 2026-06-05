@@ -32,7 +32,8 @@ library
         hashable ^>=1.4,
         template-haskell >=2.19 && <2.24,
         matrix ^>=0.3.6,
-        vector ^>=0.13.0
+        vector ^>=0.13.0,
+        text ^>=2.1.0
     hs-source-dirs:   .
     default-language: GHC2021
 

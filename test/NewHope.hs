@@ -9,8 +9,8 @@ main =
   [
     bgroup "GP" [ bench "F"  $ nf newHopeNTT safeThreshold
                , bench "NF" $ nf newHopeNTT safeThreshold ]
-  -- , bgroup "IA" [ bench "F"  $ whnf newHopeVerif safeThreshold
-  --               , bench "NF" $ whnf newHopeVerifNF safeThreshold ]
+  , bgroup "IA" [ bench "F"  $ whnf newHopeVerif safeThreshold
+                , bench "NF" $ whnf newHopeVerifNF safeThreshold ]
   , bgroup "CM" [ bench "F"  $ nf (pointNF.newHopeModulos) safeThreshold
                 , bench "NF" $ nf (pointNF.newHopeModulosNF) safeThreshold ]
   ]

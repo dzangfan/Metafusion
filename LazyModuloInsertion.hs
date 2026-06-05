@@ -1,22 +1,25 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE OverloadedStrings #-}
 module LazyModuloInsertion where
 
-import Control.Monad
-import Control.Monad.State
-import Data.Array ((!), Array)
-import Data.Bifunctor (second)
-import Data.Bits (shiftL, shiftR, (.&.))
-import Data.Function ((&))
-import Data.Functor
-import Data.List.NonEmpty (NonEmpty(..))
-import Data.Word
-import GHC.Exts (inline)
-import Prelude hiding (pred)
-import PrimRoots as Prim
-import Zoo
+import           Control.Monad
+import           Control.Monad.State
+import           Data.Array ((!), Array)
+import           Data.Bifunctor (second)
+import           Data.Bits (shiftL, shiftR, (.&.))
+import           Data.Function ((&))
+import           Data.Functor
+import           Data.List.NonEmpty (NonEmpty(..))
+import qualified Data.Text.Lazy as T
+import qualified Data.Text.Lazy.Builder as B
+import           Data.Word
+import           GHC.Exts (inline)
+import           Prelude hiding (pred)
+import           PrimRoots as Prim
+import           Zoo
 
 #ifdef TRACE
-import Debug.Trace
+import           Debug.Trace
 #endif
 
 data HiTerm v x
@@ -192,31 +195,33 @@ type Ω = Int -> Int
 -- Generating C programs
 --
 
-type Name   = String
-type Gensym = State (Int, [String])
+type Name   = B.Builder
+type Gensym = State (Int, B.Builder)
 
 gensym :: Gensym Name
 gensym = do i <- gets fst; modify (\(j, s) -> (j + 1, s))
-            return ("x" ++ show i)
+            return (B.singleton 'x' <> B.fromString (show i))
 
-statement :: String -> Gensym ()
-statement s = modify (second (s :))
+statement :: B.Builder -> Gensym ()
+statement s = modify (second add)
+  where add b = b <> B.fromString "  " <> s <> B.fromString ";\n"
 
 maxUint :: Int -> Integer
 maxUint n = fromIntegral (1 `shiftL` n - 1 :: Word32)
 
-φGen :: LoTerm Name (Gensym String) -> Gensym String
+φGen :: LoTerm Name (Gensym B.Builder) -> Gensym B.Builder
 φGen t = case t of
-  LoLit i -> return (show i)
-  LoRead n -> return ("A[" ++ show n ++ "]")
+  LoLit i -> return (B.fromString (show i))
+  LoRead n ->
+    return ("A[" <> B.fromString (show n) <> "]")
   LoVar v -> return v
   LoU16 x -> castM "uint16_t" x
   LoI16 x -> castM "int16_t" x
-  LoAsr x n -> do s <- x; binop ">>" s (show n)
-  LoBitAnd x n -> do s <- x; binop "&" s (show n)
+  LoAsr x n -> do s <- x; binop ">>" s (B.fromString (show n))
+  LoBitAnd x n -> do s <- x; binop "&" s (B.fromString (show n))
   LoMask x n -> do
     s <- x
-    return ("(" ++ s ++ " & " ++ show (maxUint n) ++ ")")
+    return ("(" <> s <> " & " <> B.fromString (show (maxUint n)) <> ")")
   LoAddU16 x y -> binopM "+" x y
   LoSubU16 x y -> binopM "-" x y
   LoSubI16 x y -> binopM "-" x y
@@ -227,23 +232,24 @@ maxUint n = fromIntegral (1 `shiftL` n - 1 :: Word32)
   LoSkip -> return "";
   LoLet it x h -> do
     res <- x; name <- gensym
-    statement (show it ++ " " ++ name ++ " = " ++ res)
+    statement (B.fromString (show it) <> " " <> name <> " = " <> res)
     h name
   LoWrite n x body -> do
     res <- x
-    statement ("A[" ++ show n ++ "] = " ++ res)
+    statement ("A[" <> B.fromString (show n) <> "] = " <> res)
     body
   LoExact op x h ->
-    x >>= h <&> (\s -> tag ++ s ++ tag) where tag = "/* " ++ op ++ " */"
-  where binop :: Monad m => String -> String -> String -> m String
+    x >>= h <&> (\s -> tag <> s <> tag)
+    where tag = "/* " <> B.fromString op <> " */"
+  where binop :: Monad m => B.Builder -> B.Builder -> B.Builder -> m B.Builder
         binop op a b =
-          return ("(" ++ a ++ " " ++ op ++ " " ++ b ++  ")")
+          return ("(" <> a <> " " <> op <> " " <> b <>  ")")
         binopM :: Monad m
-               => String -> m String -> m String -> m String
+               => B.Builder -> m B.Builder -> m B.Builder -> m B.Builder
         binopM op m₁ m₂ = do s₁ <- m₁; s₂ <- m₂; binop op s₁ s₂
-        cast :: String -> String -> String
-        cast ty s = "((" ++ ty ++ ")" ++ s ++ ")"
-        castM :: Monad m => String -> m String -> m String
+        cast :: B.Builder -> B.Builder -> B.Builder
+        cast ty s = "((" <> ty <> ")" <> s <> ")"
+        castM :: Monad m => B.Builder -> m B.Builder -> m B.Builder
         castM ty = fmap (cast ty)
 
 --
@@ -444,15 +450,15 @@ newHopeNTT θ =
   hylo ( τUnroll (newHopePrimRoots!) (τInsert θ φGen)
        , ψTrail 1024 10) (1, 0, 0)
   & (\m -> evalCounter m (const 1) (const undef))
-  & fst & flip execState (0, []) & \(_, ss) ->
-  reverse ss & map (\s -> "  " ++ s ++ ";\n") & join
+  & fst & flip execState (0, mempty) & \(_, ss) ->
+  B.toLazyText ss & T.unpack
 
 newHopeNTTNF :: Threshold -> String
 newHopeNTTNF θ =
   h (1, 0, 0)
   & (\m -> evalCounter m (const 1) (const undef))
-  & fst & flip execState (0, []) & \(_, ss) ->
-  reverse ss & map (\s -> "  " ++ s ++ ";\n") & join
+  & fst & flip execState (0, mempty) & \(_, ss) ->
+  B.toLazyText ss & T.unpack
   where h = fmap (cata φGen)
           . cata (τInsert θ In)
           . cata (τUnroll (newHopePrimRoots!) In)
@@ -557,8 +563,8 @@ handmadeNTT :: String
 handmadeNTT =
   hylo ( τUnroll (newHopePrimRoots!) (τHandmade φGen)
        , ψTrail 1024 10) (1, 0, 0)
-  & flip execState (0, []) & \(_, ss) ->
-  reverse ss & map (\s -> "  " ++ s ++ ";\n") & join
+  & flip execState (0, mempty) & \(_, ss) ->
+  B.toLazyText ss & T.unpack
 
 handmadeVerif :: Either (String, Int) (Iv, StoreIv)
 handmadeVerif =
